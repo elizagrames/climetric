@@ -1,0 +1,31 @@
+Package: climetric
+Type: Package
+Title: Process weather and climate data 
+Version: 0.1.0
+Author: Eliza Grames
+Maintainer: Eliza Grames <egrames@unr.edu>
+Description: Calculating rates of climate change or extent of climate change 
+        exposure is important for many environmental questions. Working with climate 
+        data can be a bit daunting for researchers who are not climatologists and 
+        simply want to use climate change as a covariate for another model, however, 
+        because it is complex, multifaceted, and the files are typically enormous and 
+        difficult to work with. To help make calculating climate change metrics slightly 
+        easier for researchers, climetric is an R package that calculates a common 
+        set of climate and weather data to characterize rates of climate change and 
+        departures from baseline conditions using univariate or multivariate approaches. 
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Imports:
+    raster,
+    ncdf4,
+    sp,
+    trend,
+    matrixcalc
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+Depends: 
+    R (>= 2.10)
+RoxygenNote: 7.1.2

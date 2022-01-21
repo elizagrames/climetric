@@ -1,0 +1,261 @@
+---
+title: "Generating simple climate change metrics with climetric"
+output: rmarkdown::html_vignette
+author: Eliza Grames
+vignette: >
+  %\VignetteIndexEntry{climdat-intro}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>", 
+  echo = TRUE, fig.width=6, fig.height = 6
+)
+
+knitr::opts_knit$set(global.par = TRUE)
+par(las=1, pty="s", bty="n", pch=16, lwd=2, axes=F)
+```
+
+```{r setup, echo=FALSE}
+library(climdat)
+```
+
+# Getting started
+
+Calculating rates of climate change or extent of climate change exposure is important for many environmental questions. Working with climate data can be a bit daunting for researchers who are not climatologists and simply want to use climate change as a covariate for another model, however, because it is complex, multifaceted, and the files are typically enormous and difficult to work with. As a consequence, climate change is often characterized superficially or with simplistic measures (e.g. mean annual temperature) that do not capture the multifaceted nature of climate or connections between different variables that have synergistic effects (e.g. including both temperature and precipitation).
+
+To help make calculating climate change metrics slightly easier for researchers, climetric is an R package that calculates a common set of climate and weather data to characterize rates of climate change and departures from baseline conditions using univariate or multivariate approaches.
+
+*Disclaimer:* climetric is not intended as an all-purpose or multifunctional tool, just to reduce a few headaches. It mostly only works if you follow along with the vignette because the documentation is not complete and neither is the fool-proofing (e.g. warnings and errors) so functions could return nonsense numbers if your data is not structured as expected. I also have not done unit tests so there could be code issues still at this point.
+
+# Getting data from the Climatology Lab
+
+Climate and weather data from any source can be used with the later functions in the package, however, climetric is designed to work with the TerraClim dataset produced by the Climatology Lab. To save files locally, users can either download data from TerraClim using the methods provided on the Climatology Lab website, or use the generate_wget() and run_wget() functions in climetric to download files. At some point we plan to add support for MACA and other climate datasets.
+
+```{r, eval=FALSE}
+# First, we need to define our bounding box
+# Here, we are going to use the state of Nevada as an example
+states <- raster::getData(country="USA", level=1)
+nevada <- states[states$NAME_1=="Nevada",]
+
+# Now we can generate a script that we will use to download files
+# We have to pass it the bounding box, which layers we want to download, which 
+# years of data to pull, the database (either TerraClimate or MACA), if the 
+# script should be returned as an object or written, and if written, where
+generate_wget(bbox=raster::extent(nevada), 
+              layers=c("tmax", "tmin"), 
+              startyear = 1958, endyear = 2020, 
+              db="TerraClimate",
+              writefile = T, directory = "./")
+
+# This has produced a new file in our working directory (i.e. "./") called
+# download_data.sh, which is a shell script that is based on a script written
+# and made available by Katherine Hegewisch
+
+# To actually download the data, we now need to run that script
+# We can do this with run_wget(), a wrapper function for a system command
+run_wget(script.path = "./download_data.sh", directory = "./")
+
+# Depending on how large of an area your bounding box covers and how many years 
+# of data you selected, this could take a few minutes. You should see progress 
+# updates in the console as layers download, and NetCDF files (extension .nc) 
+# will appear in the specified directory.
+
+# If you get stuck on a line starting with 'Connecting to thredds..." for a
+# while, it may be a problem with your connection (e.g. some university networks 
+# block the download). I don't have a fix for this other than to run it 
+# somewhere else (e.g. on home internet).
+
+```
+
+# Loading weather/climate layers into R
+
+If using TerraClim or MACA datasets that have been downloaded and saved locally, users can load datasets into R using the brick_nc() function that converts the NetCDF files into a RasterBrick. Doing this and plotting the raster layers for a few variables can be useful to check that the correct spatial extent was downloaded and everything looks as expected.
+
+```{r, eval=TRUE}
+# Let's read in tmax as a brick
+tmax <- brick_nc("./terraclimate_tmax.nc")
+
+# Now we can check some assumptions, first, that it is indeed a RasterBrick.
+# It also has 756 layers, which is good because we downloaded all months from 
+# January 1958 to December 2020, and 63 years times 12 months per year = 756
+# The extent also looks like what we were expecting
+tmax
+
+# Later, the dimensions of this are going to be important if we want to convert
+# some of the metrics back to a raster; it is worth saving the dimensions
+# and the extent or making a note of them
+ext.nv <- raster::extent(tmax)
+dim.nv <- dim(tmax)[1:2]
+
+# To make sure everything is oriented properly, we can plot the first layer, which
+# is January 1958. These seem like reasonable maximum temperatures for January.
+raster::plot(tmax[[1]], axes=F, box=F)
+
+# We could also plot another month, e.g. August 1958, just to be confident
+raster::plot(tmax[[8]], axes=F, box=F)
+
+# Let's read in a second layer: minimum temperature
+tmin <- brick_nc("./terraclimate_tmin.nc")
+raster::plot(tmin[[1]], axes=F, box=F) # January 1958
+```
+
+If using climate or weather data from another source, users should format it as a RasterBrick where each layer of the brick represents a single time step (e.g. a month or year). climetric expects years to be complete (i.e. January-December exists as a layer for every year if layers represent months) and will produce nonsense numbers if they are not. 
+
+# Extracting weather and climate data
+
+Once data has been loaded into R as a RasterBrick where each layer represents a time step (e.g. a month or year), climetric extracts the raw data and converts it to a matrix. This matrix can then be stored locally as a .csv file which makes the process of calculating multivariate climate departures more efficient and uses less memory in R. This is likely not the most technically correct solution, however, it prevents problems associated with R crashing and losing objects stored in the environment (a not uncommon problem when processing spatial data on a laptop or personal computer!). 
+
+Different types of metrics can be extracted from the same climate or weather layer. For example, consider the tmax (the mean daily maximum temperature per month) layer from TerraClimate. Let's assume we have tmax for all months from January 1958 to December 2020, which would be a RasterBrick with 756 layers (12*63). From this, we could calculate the mean annual tmax (i.e. within each year, take the mean of the 12 monthly tmax values). We could also take the maximum annual tmax (i.e. how hot was it on average during the hottest month of that year), which may be relevant for questions involving extremes (e.g. perhaps a population could not survive prolonged heat exposure). We could even take the minimum annual tmax (i.e. what was the average daily maximum temperature during the least hot month of the year) although interpretations of this are a bit confusing and it is hard to come up with a biological situation in which this matters (perhaps a species that needs at least one month of the year with temperatures below a certain maximum for development). 
+
+Instead of only considering annual measures, we could also extract seasonal data. For example, maximum spring tmax or mean fall tmax. Similarly, we could extract data from a specific month each year if there was some reason to think it mattered (e.g. tmax during a migration that is triggered by photoperiod and so only occurs during a certain month). Note that if you are using yearly data rather than monthly (i.e. each layer in your RasterBrick represents a year), you can not select a season, water year, or specific months from which to extract data.
+
+```{r, eval=TRUE}
+# Using the tmax brick, we can extract some variables
+# We highly recommend using writefile=T, because writefile=F returns a list of
+# lists of matrices, and occasionally results in the R session being aborted
+
+mean.seasonal.tmax <- extract_data(brick=tmax, 
+                                 measure="mean", 
+                                 timeframe=c("spring", "fall"),
+                                 layer_type="month",
+                                 hemisphere="northern",
+                                 writefile = F)
+
+mean.seasonal.tmin <- extract_data(brick=tmin, 
+                                 measure="mean", 
+                                 timeframe=c("spring", "fall"),
+                                 layer_type="month",
+                                 hemisphere="northern",
+                                 writefile = F)
+```
+
+# Calculating departures from baseline conditions
+
+After extracting and summarizing the data of interest, users should have some number of matrices where the number of rows is equal to the number of cells in the bounding box and the number of columns is equal to the number of years. All climate and weather variables should have the same dimensions. These matrices may either be saved as objects in the working environment, or (we recommend) as .csv files stored locally so that they can be read in at a later time for re-analysis, etc.
+
+We can now use these data to calculate departures from baseline conditions and trends over time. There are two different 'departure' methods included in base climetric functions: Mahalanobis distance (<a href="doi.org/10.1007/s13171-019-00164-5">Mahalanobis 1936</a>) or Standardized Euclidean Distance. These methods can be read about in more depth elsewhere (e.g. <a href="doi.org/10.1111/gcb.13645">Mahony et al. (2017)</a>). In a very brief, informal definition, Mahalanobis distance is less sensitive to correlations between different variables and can also be interpreted using a chi distribution. We recommend using it instead of SED, but have left SED in as an option in case someone wants to use it. Either measure of distance can be implemented as a univariate or multivariate metric depending on how many climate and weather variables users pass to the function.
+
+```{r}
+# The variables we have selected are correlated
+# This is okay and will be accounted for by the distance metric we use
+
+random_sites <- sample(1:nrow(mean.seasonal.tmax$fall$mean), 100, replace=F)
+
+plot(mean.seasonal.tmax$fall$mean[random_sites,] ~ mean.seasonal.tmin$fall$mean[random_sites,], 
+     las=1, xlab="Fall tmin", ylab="Fall tmax", axes=F); axis(1); axis(2)
+hist(cor(mean.seasonal.tmax$fall$mean[random_sites,], mean.seasonal.tmin$fall$mean[random_sites,]),
+     xlab="Correlation between fall tmax and fall tmin", main="", las=1)
+
+plot(mean.seasonal.tmax$fall$mean[random_sites,] ~ mean.seasonal.tmax$spring$mean[random_sites,], 
+     las=1, ylab="Fall tmax", xlab="Spring tmax", axes=F); axis(1); axis(2)
+hist(cor(mean.seasonal.tmax$fall$mean[random_sites,], mean.seasonal.tmax$spring$mean[random_sites,]),
+     xlab="Correlation between fall and spring tmax", main="", las=1)
+```
+
+When calculating departures, users must specify which years constitute the baseline (i.e. historical) conditions and which are the comparison years (i.e. the future relative to baseline). In order to fairly characterize climate, which is long-term as opposed to short term, we recommend using at least 10 (but preferably about 30) years for each period.
+
+```{r}
+# Here, we somewhat arbitrarily set the baseline as 1958 to 1985
+# And decided to use the most recent 30 years as the comparison period
+
+# Note that we pass however may variables we want to the function as a list
+# Here, we use the mean fall tmax and the mean fall tmin
+climdep <- get_departures(list(mean.seasonal.tmax$fall$mean,
+                               mean.seasonal.tmin$spring$mean), 
+                          baseline.years=1958:1985, 
+                          comparison.years=1991:2020, 
+                          yearbounds = c(1958, 2020),
+                          dist.method="mahalanobis")
+
+# What we get back is a matrix where each row is a cell in our raster grid
+# and each column is one of the years in our comparison years
+dim(climdep)
+
+# We can get a general sense of what departures look like by plotting a subset
+# of all the cells
+
+random_sites <- climdep[sample(1:nrow(climdep), 100, replace=F),]
+
+for(i in 1:nrow(random_sites)){
+  if(i==1){
+    plot(random_sites[i,] ~ seq(1991, 2020, 1), type="l", pty="s", las=1, 
+         ylab="Departure", xlab="Year", axes=F,
+         ylim=c(floor(min(random_sites)), ceiling(max(random_sites))))
+    axis(1); axis(2)
+  }else{
+    lines(random_sites[i,] ~ seq(1991, 2020, 1))
+  }
+}
+
+```
+
+# Estimating rates of climate change
+
+Although the departures calculated above can be used for a variety of purposes (e.g. time series analysis, mean departure from baseline, etc.), often ecologists and environmental scientists want to use climate change as a spatial covariate, not a time series. For example, to estimate which regions have experienced the most rapid rates of climate change or to compare population trends from sites with different rates of climate change. 
+
+To generate a raster layer like this, we can use the function get_trend() on the departures. There are many different ways users could calculate trends, but to keep things simple, climetric implements two trend measures: 'slope slopes' (i.e. the slope from a simple linear regression using ordinary least squares) and Theil-Sen slopes (<a href="doi.org/10.1007/978-94-011-2546-8_20">Theil 1950</a>, <a href="doi.org/10.1080/01621459.1968.10480934">Sen 1968</a>), which are less sensitive to outliers at the start or end of a series.
+
+```{r}
+trends <- get_trends(climdep, "sen")
+
+# We can get an overall sense of what trends are across the region
+hist(trends, border=F, xlab="Theil-Sen slope of departure")
+
+# Or, better yet, we can convert it to a raster; we just need the dimensions
+# You can figure out the dimensions and extent from any layer in your RasterBrick
+# We use the objects we saved earlier for this
+trend_raster <- raster::raster(array(trends, dim=dim.nv),
+                               xmn=ext.nv[1], xmx=ext.nv[2],
+                               ymn=ext.nv[3], ymx=ext.nv[4])
+raster::plot(trend_raster, box=F, axes=F)
+
+```
+
+Note that get_trend() can also be used on raw data and does not have to only be used on departures from baseline conditions. For example, users could get the trend in mean fall tmax if that was one of the variables extracted, or, as shown here, the mean spring minimum temperature.
+
+```{r}
+# First, we want to only get the trend in the comparison period relative 
+# to baseline, so we need to check the diminsions of the data
+
+spring_tmin <- mean.seasonal.tmin$spring$mean
+dim(spring_tmin)
+spring_tmin_recent <- spring_tmin[,34:63] # only the most recent 30 years
+
+spring_tmin_trends <- get_trends(spring_tmin_recent, trend.type = "sen") 
+
+spring_tmin_trend_raster <- raster::raster(array(spring_tmin_trends, dim=dim.nv),
+                               xmn=ext.nv[1], xmx=ext.nv[2],
+                               ymn=ext.nv[3], ymx=ext.nv[4])
+
+raster::plot(spring_tmin_trend_raster, box=F, axes=F)
+
+
+# We could do the same for fall tmax
+fall_tmax <- mean.seasonal.tmax$fall$mean
+dim(fall_tmax)
+fall_tmax_recent <- fall_tmax[,34:63] # only the most recent 30 years
+
+fall_tmax_trends <- get_trends(fall_tmax_recent, trend.type = "sen") 
+
+fall_tmax_trend_raster <- raster::raster(array(fall_tmax_trends, dim=dim.nv),
+                               xmn=ext.nv[1], xmx=ext.nv[2],
+                               ymn=ext.nv[3], ymx=ext.nv[4])
+
+raster::plot(fall_tmax_trend_raster, box=F, axes=F)
+```
+
+# Optional: subsetting data to polygons
+
+Lastly, now that raster layers estimating rates of climate change or related different variables have been generated, users may want to subset them to only a few points of interest (e.g. study sites) or to a polygon (e.g. a species range map). This could have been done earlier in the process (e.g. clipping each RasterBrick), however, we recommend doing this step last because often users will want to view the raster for the entire region to be confident in the results. If working with many polygons (e.g. species ranges), it is also computationally faster to calculate baseline climate change layer(s) and then mask them by each polygon, rather than generating a new climate change layer for every polygon.
+
+```{r}
+states <- raster::getData(country="USA", level=1)
+nevada <- states[states$NAME_1=="Nevada",]
+
+nv_clim <- raster::mask(trend_raster, nevada)
+raster::plot(nv_clim, axes=F, box=F)
+```
