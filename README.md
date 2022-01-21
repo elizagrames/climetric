@@ -1,1 +1,7 @@
-# climetric
+# climetric: an R package for processing climate and weather data
+
+Calculating rates of climate change or extent of climate change exposure is important for many environmental questions. Working with climate data can be a bit daunting for researchers who are not climatologists and simply want to use climate change as a covariate for another model, however, because it is complex, multifaceted, and the files are typically enormous and difficult to work with. As a consequence, climate change is often characterized superficially or with simplistic measures (e.g. mean annual temperature) that do not capture the multifaceted nature of climate or connections between different variables that have synergistic effects (e.g. including both temperature and precipitation).
+
+To help make calculating climate change metrics slightly easier for researchers, climetric is an R package that calculates a common set of climate and weather data to characterize rates of climate change and departures from baseline conditions using univariate or multivariate approaches.
+
+*Disclaimer:* climetric is not intended as an all-purpose or multifunctional tool, just to reduce a few headaches. It mostly only works if you follow along with the vignette because the documentation is not complete and neither is the fool-proofing (e.g. warnings and errors) so functions could return nonsense numbers if your data is not structured as expected. I also have not done unit tests so there could be code issues still at this point.
