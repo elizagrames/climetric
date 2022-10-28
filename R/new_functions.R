@@ -32,7 +32,7 @@ generate_wget <- function(bbox, layers, startyear, endyear,
                           writefile=TRUE, directory="./"){
 
   if(db=="TerraClimate"){
-    base_script <- climdat::skeleton_wget
+    base_script <- climetric::skeleton_wget
     base_script <- gsub("user.min.lon", bbox[1], base_script)
     base_script <- gsub("user.max.lon", bbox[2], base_script)
     base_script <- gsub("user.min.lat", bbox[3], base_script)
